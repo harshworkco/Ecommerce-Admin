@@ -1,0 +1,143 @@
+ECOMMERCE ADMIN - FULL PROJECT SUMMARY
+========================================
+Generated: 2026-10-04
+Backend Base URL: http://localhost:5000
+Frontend: open frontend/index.html (or serve on :3000), talks to :5000
+Stack: Node.js + Express + MySQL (mysql2) + JWT + bcryptjs + vanilla HTML/CSS/JS frontend
+
+PROJECT STRUCTURE
+-----------------
+backend/server.js                 - app entry, mounts all routes
+backend/config/db.js              - MySQL pool + auto CREATE DATABASE + tables
+backend/middleware/auth.js        - authRequired (JWT), authorizeRoles
+backend/routes/auth.js            - register, login, me
+backend/routes/dashboard.js       - stats, recent-orders, sales-chart, order-status
+backend/routes/orders.js          - orders CRUD + status + items
+backend/routes/users.js           - customers CRUD + block/unblock
+backend/routes/payments.js        - payments CRUD + status sync to orders
+backend/routes/analytics.js       - overview, revenue, top-products, top-customers, payments, user-growth
+backend/routes/products.js        - products CRUD + stock
+backend/sql/schema.sql            - full manual SQL (auto-run on start too)
+backend/package.json              - scripts: start, dev
+backend/.env / .env.example       - PORT, DB_*, JWT_*
+PROJECT_SUMMARY.txt (this file)   - full summary, replaces old README.md
+
+REMOVED UNUSED
+--------------
+1. backend/README.md              - outdated Step-1-only doc, replaced by this file
+2. package.json script init-db   - pointed to missing sql/init.js, removed
+3. GET /api/protected            - temporary test route in server.js, removed
+
+SETUP
+-----
+1. MySQL running, DB auto-created on start (ecommerce_admin)
+   Manual: mysql -u root < backend/sql/schema.sql
+2. cd backend
+   npm install
+   npm start  (or npm run dev)
+3. Login: POST /api/auth/login {email: admin@test.com, password: 123456}
+   Use: Authorization: Bearer <token> for all /api/* except /api/auth/*
+
+DATABASE TABLES
+---------------
+admins(id, name, email UNIQUE, password_hash, role[super_admin|admin|manager], is_active, created_at, updated_at)
+products(id, name, description, price DECIMAL, stock INT, category, image_url, is_active, created_at, updated_at)
+users(id, name, email UNIQUE, phone, password_hash NULL, address, is_active, created_at, updated_at)
+orders(id, user_id NULL, customer_name, customer_email, total_amount DECIMAL, status[pending|confirmed|shipped|delivered|cancelled], payment_status[unpaid|paid|refunded], shipping_address, created_at, updated_at)
+order_items(id, order_id FK CASCADE, product_name, quantity, price, created_at)
+payments(id, order_id FK CASCADE, user_id NULL, amount DECIMAL, method[cod|card|upi|netbanking|wallet], status[pending|success|failed|refunded], transaction_id UNIQUE, created_at, updated_at)
+
+ALL APIS
+--------
+AUTH (public register/login, protected me):
+POST /api/auth/register {name,email,password,role?} -> 201 {admin,token}
+POST /api/auth/login {email,password} -> 200 {admin,token}
+GET  /api/auth/me (Bearer) -> 200 {admin}
+
+DASHBOARD (Bearer required):
+GET /api/dashboard/stats -> {totalAdmins,totalOrders,totalRevenue,totalUsers,totalProducts,pendingOrders}
+GET /api/dashboard/recent-orders?limit=5 -> {orders[]}
+GET /api/dashboard/sales-chart?days=7 -> {chart[{date,orders,revenue}]}
+GET /api/dashboard/order-status -> {breakdown[{status,count}]}
+
+ORDERS (Bearer):
+GET  /api/orders?search=&status=&page=1&limit=10 -> {total,page,orders[]+item_count}
+GET  /api/orders/:id -> {order,items[]}
+POST /api/orders {customer_name,customer_email?,shipping_address?,status?,payment_status?,total_amount? OR items[{product_name,quantity,price}]} -> 201, total auto-sums items, transaction
+PUT  /api/orders/:id/status {status} -> status update
+PUT  /api/orders/:id {customer_name?,customer_email?,total_amount?,status?,payment_status?,shipping_address?}
+DELETE /api/orders/:id (cascades items+payments)
+
+USERS / CUSTOMERS (Bearer):
+GET  /api/users?search=&is_active=&page=&limit= -> {total,users[]+order_count}
+GET  /api/users/:id -> {user,orders[10]}
+POST /api/users {name,email,phone?,password?,address?} -> 201
+PUT  /api/users/:id {name?,email?,phone?,password?,address?}
+PUT  /api/users/:id/status {is_active:true/false} -> block/unblock
+DELETE /api/users/:id
+
+PAYMENTS (Bearer, syncs orders.payment_status: success->paid, refunded->refunded, else unpaid):
+GET  /api/payments?search=&status=&method=&page=&limit= -> {total,payments[]+customer_name,collected}
+GET  /api/payments/:id -> {payment}
+POST /api/payments {order_id,amount?(defaults to order total),method?,status?,transaction_id?,user_id?} -> 201
+PUT  /api/payments/:id/status {status}
+DELETE /api/payments/:id
+
+ANALYTICS (Bearer):
+GET /api/analytics/overview -> {totalOrders,totalRevenue,avgOrderValue,totalUsers,collectedPayments,last30dOrders,last30dUsers}
+GET /api/analytics/revenue?days=30 -> {days,chart[]}
+GET /api/analytics/top-products?limit=5 -> {products[]} from order_items
+GET /api/analytics/top-customers?limit=5 -> {customers[]} by spent
+GET /api/analytics/payments -> {byMethod[],byStatus[]}
+GET /api/analytics/user-growth?days=30 -> {days,chart[]}
+
+PRODUCTS (Bearer, new Step 7):
+GET  /api/products?search=&category=&is_active=&page=&limit= -> {total,products[]}
+GET  /api/products/:id -> {product}
+POST /api/products {name,price,stock?,description?,category?,image_url?} -> 201
+PUT  /api/products/:id {name?,price?,stock?,description?,category?,image_url?,is_active?}
+PUT  /api/products/:id/stock {stock}
+DELETE /api/products/:id
+
+VERIFIED TEST RESULTS (2026-10-04, live server)
+------------------------------------------------
+health: {"status":"ok","message":"Ecommerce Admin API running"}
+POST /api/products 201 {"product":{"id":1,"name":"T-Shirt","price":"500.00","stock":100}}
+GET /api/products 200 total:1
+GET /api/dashboard/stats 200 {"totalAdmins":1,"totalOrders":1,"totalRevenue":2200,"totalUsers":1,"totalProducts":1,"pendingOrders":0}
+GET /api/products without token -> 401 (auth enforced)
+Earlier steps verified: auth register/login/me, orders create/list/status, users create/block, payments create/refund sync, analytics all 6 endpoints.
+
+NOTES
+-----
+- MCP MySQL tool is READ-ONLY, so CREATE DATABASE/TABLE via MCP fails; backend auto-creates on npm start (verified working).
+- orders.user_id is nullable, no FK to users yet; users link via user_id OR customer_email (see users list order_count, users/:id orders).
+- order_items uses product_name string snapshot, not product_id FK; products table is standalone catalog.
+
+FRONTEND - React + Vite + axios + react-router-dom (replaces old vanilla HTML)
+--------------------------------------------------------------------------------
+Location: frontend/ (package.json, vite.config.js, index.html, src/)
+Run backend first (port 5000), then frontend:
+  cd frontend
+  npm install
+  npm run dev      -> http://localhost:3000 (login admin@test.com / 123456)
+  npm run build    -> production dist/ (verified: 99 modules, built OK)
+API layer: src/api.js - axios instance, baseURL http://localhost:5000
+  (or VITE_API_URL), token interceptor, 401 auto-redirect to /login.
+Auth: src/context/AuthContext.jsx - login/register/logout, localStorage token.
+Routes (src/App.jsx, protected, Layout sidebar):
+  /login, / (Dashboard), /products, /orders, /users, /payments, /analytics
+Pages: Login.jsx, Dashboard.jsx (stat cards+recent+status meters),
+  Products.jsx (search/add/edit/stock/del), Orders.jsx (filter/create/view/status/del),
+  Users.jsx (add/block/del), Payments.jsx (record/status/del+collected),
+  Analytics.jsx (overview/revenue bars/top-products/top-customers/pay breakdown).
+Style: src/index.css - modern dark sidebar + cards + badges + responsive.
+Verified: npm install OK, vite build OK, dev serve / 200 has-root, backend / 200.
+
+FULL API TEST 2026-10-04: 31/31 PASS
+------------------------------------
+auth/login, auth/me, auth/me-401, products/create|list|get|update|stock,
+users/create|list|get|update|block, orders/create|list|get|status|filter,
+payments/create|list|get, dashboard/stats|recent-orders|sales-chart|order-status,
+analytics/overview|revenue|top-products|top-customers|payments|user-growth.
+React build: vite v5, 99 modules transformed, dist/ OK.
